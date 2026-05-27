@@ -80,3 +80,39 @@ impl SerialPort {
         }
     }
 }
+
+impl core::fmt::Write for SerialPort {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        for byte in s.bytes() {
+            match byte {
+                b'\n' => {
+                    self.write_byte(b'\r');
+                    self.write_byte(b'\n');
+                }
+                _ => self.write_byte(byte),
+            }
+        }
+        Ok(())
+    }
+}
+
+pub static SERIAL1: spin::Mutex<SerialPort> = spin::Mutex::new(SerialPort::new(0x3F8));
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {
+        $crate::serial::_print(format_args!($($arg)*));
+    };
+}
+
+#[macro_export]
+macro_rules! println {
+    () => ($crate::print!("\n"));
+    ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
+}
+
+#[doc(hidden)]
+pub fn _print(args: core::fmt::Arguments) {
+    use core::fmt::Write;
+    SERIAL1.lock().write_fmt(args).unwrap();
+}

@@ -4,8 +4,8 @@
 use core::panic::PanicInfo;
 
 mod serial;
-
-use serial::SerialPort;
+mod gdt;
+mod mem;
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -21,7 +21,6 @@ const CHECKSUM: u32 = -(MAGIC as i32 + FLAGS as i32) as u32;
 
 // The boot assembly
 core::arch::global_asm!(
-    ".intel_syntax noprefix",
     ".section .multiboot_header",
     ".align 4",
     ".long 0x1BADB002", // MAGIC
@@ -29,6 +28,7 @@ core::arch::global_asm!(
     ".long -0x1BADB005", // CHECKSUM
     ".section .bss",
     ".align 16",
+    ".global stack_top",
     "stack_bottom:",
     ".skip 16384", // 16KB
     "stack_top:",
@@ -46,10 +46,13 @@ core::arch::global_asm!(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_main() -> ! {
-    let com1 = SerialPort::new(0x3F8);
-    com1.init();
+    crate::serial::SERIAL1.lock().init();
 
-    com1.write_byte(b'A');
+    println!("Loading GDT...");
+    gdt::init();
+    println!("GDT Loaded Successfully!");
+
+    println!("Hello, Rust OS World! Hex: {:#X}", 0xDEADBEEFu32);
 
     loop {
         // Just hang here
