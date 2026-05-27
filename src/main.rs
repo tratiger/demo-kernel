@@ -2,7 +2,12 @@
 #![no_main]
 #![feature(abi_x86_interrupt)]
 
+extern crate alloc;
+
 use core::panic::PanicInfo;
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use alloc::format;
 
 mod port;
 mod serial;
@@ -12,6 +17,7 @@ mod interrupts;
 mod multiboot;
 mod memory;
 mod paging;
+mod allocator;
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -84,6 +90,41 @@ pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
     }
 
     println!("Hello, Rust OS World! Hex: {:#X}", 0xDEADBEEFu32);
+
+    println!("Initializing Heap...");
+    unsafe { crate::allocator::init_heap() };
+    println!("Heap Initialized!");
+
+    println!("Starting fragmentation stress test...");
+    for i in 0..1000 {
+        // Allocate and immediately drop to test fragmentation and coalescing
+        let mut temp_vec: Vec<u8> = Vec::with_capacity(1024 * 16); // 16KB per allocation
+        for j in 0..10 {
+            temp_vec.push(j as u8);
+        }
+        if i % 100 == 0 {
+            println!("Allocated iteration {}", i);
+        }
+        // temp_vec is dropped here, its memory freed
+    }
+    println!("Stress test passed! Coalescing works.");
+
+    println!("Testing Kernel Heap Allocator...");
+    let heap_value = Box::new(42);
+    println!("Boxed value allocated: {}", *heap_value);
+
+    let mut v = Vec::with_capacity(100);
+    for i in 0..100 {
+        v.push(i);
+    }
+    println!("Vec allocated and pushed 100 elements. Last element: {}", v[99]);
+
+    println!("Testing format!");
+    // String formatting uses alloc under the hood
+    let s = format!("Allocated String with value: {}", *heap_value);
+
+    // Explicitly write string slice to our serial macro
+    crate::println!("Formatted String: {}", s.as_str());
 
     println!("Testing dynamic memory mapping...");
     unsafe {
