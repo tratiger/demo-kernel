@@ -76,12 +76,24 @@ pub extern "x86-interrupt" fn double_fault_handler(_frame: InterruptStackFrame, 
     }
 }
 
+pub extern "x86-interrupt" fn page_fault_handler(_frame: InterruptStackFrame, error_code: u32) {
+    let mut cr2: u32;
+    unsafe {
+        core::arch::asm!("mov {}, cr2", out(reg) cr2, options(nomem, nostack, preserves_flags));
+    }
+    crate::println!("PAGE FAULT at address: {:#X} (Error Code: {:#X})", cr2, error_code);
+    loop {
+        unsafe { core::arch::asm!("hlt", options(nomem, nostack)) };
+    }
+}
+
 pub static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 
 pub fn init_idt() {
     unsafe {
         IDT.entries[3].set_handler_fn(breakpoint_handler as *const () as u32);
         IDT.entries[8].set_handler_fn(double_fault_handler as *const () as u32);
+        IDT.entries[14].set_handler_fn(page_fault_handler as *const () as u32);
         IDT.entries[PIC1_OFFSET as usize].set_handler_fn(timer_interrupt_handler as *const () as u32);
         IDT.entries[PIC1_OFFSET as usize + 1].set_handler_fn(keyboard_interrupt_handler as *const () as u32);
 
