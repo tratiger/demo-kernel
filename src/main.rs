@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(abi_x86_interrupt)]
+#![feature(naked_functions)]
 
 extern crate alloc;
 
@@ -18,6 +19,7 @@ mod multiboot;
 mod memory;
 mod paging;
 mod allocator;
+pub mod task;
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -138,17 +140,42 @@ pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
         println!("Successfully wrote to mapped memory. Read back: {:#X}", *ptr);
     }
 
-    println!("Testing Page Fault Exception (Accessing unmapped memory at 0x50000000)...");
-    unsafe {
-        let ptr = 0x50000000 as *mut u32;
-        let _val = core::ptr::read_volatile(ptr);
-        println!("ERROR: Should not reach this line! Value read: {:#X}", _val);
-    }
+    // NOTE: Commenting out page fault test to allow OS to continue running
+    // println!("Testing Page Fault Exception (Accessing unmapped memory at 0x50000000)...");
+    // unsafe {
+    //     let ptr = 0x50000000 as *mut u32;
+    //     let _val = core::ptr::read_volatile(ptr);
+    //     println!("ERROR: Should not reach this line! Value read: {:#X}", _val);
+    // }
 
+    println!("Initializing Scheduler...");
+    task::init();
+
+    println!("Spawning Threads...");
+    task::spawn(thread_a);
+    task::spawn(thread_b);
+
+    println!("Starting Multitasking...");
     loop {
-        // Just hang here
+        task::yield_task();
+        // Give CPU a tiny break when idle
         unsafe {
             core::arch::asm!("hlt", options(nomem, nostack));
         }
+    }
+}
+
+fn thread_a() {
+    loop {
+        crate::println!("Hello from Thread A!");
+        // We delay a bit inside the serial print or just directly yield
+        task::yield_task();
+    }
+}
+
+fn thread_b() {
+    loop {
+        crate::println!("Hello from Thread B!");
+        task::yield_task();
     }
 }
