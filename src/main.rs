@@ -1,11 +1,14 @@
 #![no_std]
 #![no_main]
+#![feature(abi_x86_interrupt)]
 
 use core::panic::PanicInfo;
 
+mod port;
 mod serial;
 mod gdt;
 mod mem;
+mod interrupts;
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -52,9 +55,30 @@ pub extern "C" fn kernel_main() -> ! {
     gdt::init();
     println!("GDT Loaded Successfully!");
 
+    println!("Loading IDT...");
+    interrupts::init_idt();
+    println!("IDT Loaded Successfully!");
+
+    println!("Testing Breakpoint...");
+    unsafe {
+        core::arch::asm!("int 3", options(nomem, nostack));
+    }
+
+    println!("Initializing PIC...");
+    interrupts::init_pic();
+    println!("PIC Initialized!");
+
+    println!("Enabling Interrupts...");
+    unsafe {
+        core::arch::asm!("sti", options(nomem, nostack));
+    }
+
     println!("Hello, Rust OS World! Hex: {:#X}", 0xDEADBEEFu32);
 
     loop {
         // Just hang here
+        unsafe {
+            core::arch::asm!("hlt", options(nomem, nostack));
+        }
     }
 }
