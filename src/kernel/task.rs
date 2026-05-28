@@ -20,7 +20,7 @@ pub enum ThreadState {
     Exited,
 }
 
-use crate::vfs::VfsNode;
+use crate::fs::types::VfsNode;
 
 pub struct Thread {
     id: usize,
