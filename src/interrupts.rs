@@ -197,6 +197,6 @@ pub extern "x86-interrupt" fn timer_interrupt_handler(_frame: InterruptStackFram
 
 pub extern "x86-interrupt" fn keyboard_interrupt_handler(_frame: InterruptStackFrame) {
     let scancode: u8 = unsafe { crate::port::Port::new(0x60).read() };
-    crate::println!("Keyboard interrupt: {:#04X}", scancode);
+    crate::keyboard::push_scancode(scancode);
     send_eoi(PIC1_OFFSET + 1);
 }

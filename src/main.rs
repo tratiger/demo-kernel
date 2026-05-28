@@ -14,6 +14,7 @@ mod allocator;
 mod gdt;
 pub mod initrd;
 mod interrupts;
+pub mod keyboard;
 mod mem;
 mod memory;
 mod multiboot;
@@ -143,13 +144,22 @@ pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
 
     println!("Testing dynamic memory mapping with user privilege...");
     unsafe {
-        // Map virtual address 0x40000000 to a new physical frame (User Code)
-        let new_frame_code = crate::memory::allocate_frame().unwrap();
-        crate::paging::map_page(
-            0x40000000,
-            new_frame_code,
-            0x3 | crate::paging::USER_ACCESSIBLE,
-        );
+        for i in 0..10 {
+            let frame = crate::memory::allocate_frame().unwrap();
+            crate::paging::map_page(
+                0x40000000 + i * 4096,
+                frame,
+                0x3 | crate::paging::USER_ACCESSIBLE,
+            );
+        }
+        for i in 0..10 {
+            let frame = crate::memory::allocate_frame().unwrap();
+            crate::paging::map_page(
+                0xA0000000 - i * 4096,
+                frame,
+                0x3 | crate::paging::USER_ACCESSIBLE,
+            );
+        }
 
         // Map virtual address 0xA0000000 to a new physical frame (User Stack)
         let new_frame_stack = crate::memory::allocate_frame().unwrap();
@@ -159,66 +169,298 @@ pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
             0x3 | crate::paging::USER_ACCESSIBLE,
         );
 
-        // Setup user mode payload string
-        let string_payload = b"Hello, World from User Mode!\n";
-        let str_addr: u32 = 0x40000000 + 100; // offset string into the code page
-
-        let filename = b"test.txt";
-        let filename_addr: u32 = 0x40000000 + 100;
-        let buf_addr: u32 = 0x40000000 + 200;
+        // Setup interactive shell payload
+        let buf_addr: u32 = 0x40000000 + 4000;
+        let line_buf_addr: u32 = 0x40000000 + 3000;
+        let prompt_addr: u32 = 0x40000000 + 2000;
+        let prompt = b"OMU-OS> ";
+        let help_msg = b"Supported commands: help, ls, cat <file>
+";
+        let help_msg_addr: u32 = 0x40000000 + 2100;
+        let ls_path = b"/";
+        let ls_path_addr: u32 = 0x40000000 + 2200;
 
         let mut user_code_payload = Vec::new();
 
-        // 1. sys_open (eax=5, ebx=filename_addr, ecx=filename.len())
-        user_code_payload.push(0xB8);
-        user_code_payload.extend_from_slice(&5u32.to_le_bytes()); // mov eax, 5
-        user_code_payload.push(0xBB);
-        user_code_payload.extend_from_slice(&filename_addr.to_le_bytes()); // mov ebx, filename_addr
-        user_code_payload.push(0xB9);
-        user_code_payload.extend_from_slice(&(filename.len() as u32).to_le_bytes()); // mov ecx, len
-        user_code_payload.extend_from_slice(&[0xCD, 0x80]); // int 0x80
+        macro_rules! emit { ($($b:expr),*) => { $(user_code_payload.push($b);)* }; }
+        macro_rules! emit_u32 {
+            ($v:expr) => {
+                user_code_payload.extend_from_slice(&$v.to_le_bytes());
+            };
+        }
 
-        // save FD returned in eax -> ebx for sys_read
-        user_code_payload.push(0x89);
-        user_code_payload.push(0xC3); // mov ebx, eax
+        let loop_start = user_code_payload.len();
 
-        // 2. sys_read (eax=3, ebx=fd, ecx=buf_addr, edx=50 (max size))
-        user_code_payload.push(0xB8);
-        user_code_payload.extend_from_slice(&3u32.to_le_bytes()); // mov eax, 3
-        user_code_payload.push(0xB9);
-        user_code_payload.extend_from_slice(&buf_addr.to_le_bytes()); // mov ecx, buf_addr
-        user_code_payload.push(0xBA);
-        user_code_payload.extend_from_slice(&50u32.to_le_bytes()); // mov edx, 50
-        user_code_payload.extend_from_slice(&[0xCD, 0x80]); // int 0x80
+        // 1. sys_write prompt
+        emit!(0xB8);
+        emit_u32!(4u32); // mov eax, 4
+        emit!(0xBB);
+        emit_u32!(1u32); // mov ebx, 1
+        emit!(0xB9);
+        emit_u32!(prompt_addr); // mov ecx, prompt_addr
+        emit!(0xBA);
+        emit_u32!(prompt.len() as u32); // mov edx, len
+        emit!(0xCD, 0x80); // int 0x80
 
-        // save bytes read returned in eax -> edx for sys_write
-        user_code_payload.push(0x89);
-        user_code_payload.push(0xC2); // mov edx, eax
+        // line_len = 0 (use ebp)
+        emit!(0xBD);
+        emit_u32!(0u32); // mov ebp, 0
 
-        // 3. sys_write (eax=4, ebx=1 (stdout), ecx=buf_addr, edx=bytes_read)
-        user_code_payload.push(0xB8);
-        user_code_payload.extend_from_slice(&4u32.to_le_bytes()); // mov eax, 4
-        user_code_payload.push(0xBB);
-        user_code_payload.extend_from_slice(&1u32.to_le_bytes()); // mov ebx, 1
-        user_code_payload.push(0xB9);
-        user_code_payload.extend_from_slice(&buf_addr.to_le_bytes()); // mov ecx, buf_addr
-        user_code_payload.extend_from_slice(&[0xCD, 0x80]); // int 0x80
+        let read_loop_start = user_code_payload.len();
 
-        // 4. sys_exit
-        user_code_payload.push(0xB8);
-        user_code_payload.extend_from_slice(&1u32.to_le_bytes()); // mov eax, 1
-        user_code_payload.push(0xBB);
-        user_code_payload.extend_from_slice(&0u32.to_le_bytes()); // mov ebx, 0
-        user_code_payload.extend_from_slice(&[0xCD, 0x80]); // int 0x80
+        // 2. sys_read 1 byte
+        emit!(0xB8);
+        emit_u32!(3u32); // mov eax, 3
+        emit!(0xBB);
+        emit_u32!(0u32); // mov ebx, 0 (stdin)
+        emit!(0xB9);
+        emit_u32!(buf_addr); // mov ecx, buf_addr
+        emit!(0xBA);
+        emit_u32!(1u32); // mov edx, 1
+        emit!(0xCD, 0x80); // int 0x80
 
-        // Just in case, loop
-        user_code_payload.extend_from_slice(&[0xEB, 0xFE]); // jmp $
+        // 3. sys_write echo 1 byte
+        emit!(0xB8);
+        emit_u32!(4u32); // mov eax, 4
+        emit!(0xBB);
+        emit_u32!(1u32); // mov ebx, 1 (stdout)
+        emit!(0xB9);
+        emit_u32!(buf_addr); // mov ecx, buf_addr
+        emit!(0xBA);
+        emit_u32!(1u32); // mov edx, 1
+        emit!(0xCD, 0x80); // int 0x80
+
+        emit!(0xA0);
+        emit_u32!(buf_addr); // mov al, [buf_addr]
+
+        emit!(0x3C, 0x0A); // cmp al, 10
+        emit!(0x0F, 0x84); // je process
+        let je_process = user_code_payload.len();
+        emit_u32!(0u32);
+
+        emit!(0x3C, 0x0D); // cmp al, 13
+        emit!(0x0F, 0x84); // je process
+        let je_process2 = user_code_payload.len();
+        emit_u32!(0u32);
+
+        emit!(0x89, 0xE9); // mov ecx, ebp
+        emit!(0x81, 0xC1);
+        emit_u32!(line_buf_addr); // add ecx, line_buf_addr
+        emit!(0x88, 0x01); // mov [ecx], al
+        emit!(0x45); // inc ebp
+
+        emit!(0xE9);
+        let current = user_code_payload.len() + 4;
+        emit_u32!((read_loop_start as isize - current as isize) as u32);
+
+        let process_start = user_code_payload.len();
+        let off = (process_start as isize - (je_process + 4) as isize) as u32;
+        user_code_payload[je_process..je_process + 4].copy_from_slice(&off.to_le_bytes());
+        let off = (process_start as isize - (je_process2 + 4) as isize) as u32;
+        user_code_payload[je_process2..je_process2 + 4].copy_from_slice(&off.to_le_bytes());
+
+        // null terminate
+        emit!(0x89, 0xE9); // mov ecx, ebp
+        emit!(0x81, 0xC1);
+        emit_u32!(line_buf_addr); // add ecx, line_buf_addr
+        emit!(0xC6, 0x01, 0x00); // mov byte ptr [ecx], 0
+
+        // check empty
+        emit!(0x85, 0xED); // test ebp, ebp
+        emit!(0x0F, 0x84); // je loop_start
+        let je_empty = user_code_payload.len();
+        emit_u32!(0u32);
+
+        // check help
+        emit!(0x83, 0xFD, 0x04); // cmp ebp, 4
+        emit!(0x0F, 0x85);
+        let jne_ls = user_code_payload.len();
+        emit_u32!(0u32);
+
+        emit!(0x81, 0x3D);
+        emit_u32!(line_buf_addr);
+        emit_u32!(u32::from_le_bytes([b'h', b'e', b'l', b'p']));
+        emit!(0x0F, 0x85);
+        let jne_ls2 = user_code_payload.len();
+        emit_u32!(0u32);
+
+        emit!(0xB8);
+        emit_u32!(4u32);
+        emit!(0xBB);
+        emit_u32!(1u32);
+        emit!(0xB9);
+        emit_u32!(help_msg_addr);
+        emit!(0xBA);
+        emit_u32!(help_msg.len() as u32);
+        emit!(0xCD, 0x80);
+
+        emit!(0xE9);
+        let current = user_code_payload.len() + 4;
+        emit_u32!((loop_start as isize - current as isize) as u32);
+
+        let ls_start = user_code_payload.len();
+        let off = (ls_start as isize - (jne_ls + 4) as isize) as u32;
+        user_code_payload[jne_ls..jne_ls + 4].copy_from_slice(&off.to_le_bytes());
+        let off = (ls_start as isize - (jne_ls2 + 4) as isize) as u32;
+        user_code_payload[jne_ls2..jne_ls2 + 4].copy_from_slice(&off.to_le_bytes());
+
+        // check ls
+        emit!(0x83, 0xFD, 0x02); // cmp ebp, 2
+        emit!(0x0F, 0x85);
+        let jne_cat = user_code_payload.len();
+        emit_u32!(0u32);
+
+        emit!(0x66, 0x81, 0x3D);
+        emit_u32!(line_buf_addr);
+        emit!(b'l', b's');
+        emit!(0x0F, 0x85);
+        let jne_cat2 = user_code_payload.len();
+        emit_u32!(0u32);
+
+        emit!(0xB8);
+        emit_u32!(5u32);
+        emit!(0xBB);
+        emit_u32!(ls_path_addr);
+        emit!(0xB9);
+        emit_u32!(1u32);
+        emit!(0xCD, 0x80);
+
+        emit!(0x89, 0xC3);
+        emit!(0xB8);
+        emit_u32!(6u32);
+        emit!(0xB9);
+        emit_u32!(buf_addr);
+        emit!(0xBA);
+        emit_u32!(1000u32);
+        emit!(0xCD, 0x80);
+
+        emit!(0x89, 0xC2); // mov edx, eax
+        emit!(0x85, 0xD2);
+        emit!(0x0F, 0x84);
+        let jz_print_ls = user_code_payload.len();
+        emit_u32!(0u32);
+
+        emit!(0x31, 0xC9);
+        let replace_loop = user_code_payload.len();
+        emit!(0x80, 0xB9);
+        emit_u32!(buf_addr);
+        emit!(0x00);
+        emit!(0x75, 0x07);
+        emit!(0xC6, 0x81);
+        emit_u32!(buf_addr);
+        emit!(0x0A); // 10 is newline
+        emit!(0x41);
+        emit!(0x39, 0xD1);
+        emit!(0x72);
+        let current = user_code_payload.len() + 1;
+        let jump_back = (replace_loop as isize - current as isize) as u8;
+        emit!(jump_back);
+
+        let print_ls = user_code_payload.len();
+        let off = (print_ls as isize - (jz_print_ls + 4) as isize) as u32;
+        user_code_payload[jz_print_ls..jz_print_ls + 4].copy_from_slice(&off.to_le_bytes());
+
+        emit!(0xB8);
+        emit_u32!(4u32);
+        emit!(0xBB);
+        emit_u32!(1u32);
+        emit!(0xB9);
+        emit_u32!(buf_addr);
+        emit!(0xCD, 0x80);
+
+        // write newline after ls
+        emit!(0xB8);
+        emit_u32!(4u32);
+        emit!(0xBB);
+        emit_u32!(1u32);
+        emit!(0xC6, 0x05);
+        emit_u32!(buf_addr);
+        emit!(0x0A);
+        emit!(0xB9);
+        emit_u32!(buf_addr);
+        emit!(0xBA);
+        emit_u32!(1u32);
+        emit!(0xCD, 0x80);
+
+        emit!(0xE9);
+        let current = user_code_payload.len() + 4;
+        emit_u32!((loop_start as isize - current as isize) as u32);
+
+        let cat_start = user_code_payload.len();
+        let off = (cat_start as isize - (jne_cat + 4) as isize) as u32;
+        user_code_payload[jne_cat..jne_cat + 4].copy_from_slice(&off.to_le_bytes());
+        let off = (cat_start as isize - (jne_cat2 + 4) as isize) as u32;
+        user_code_payload[jne_cat2..jne_cat2 + 4].copy_from_slice(&off.to_le_bytes());
+
+        // check cat
+        emit!(0x83, 0xFD, 0x04); // cmp ebp, 4
+        emit!(0x0F, 0x8E);
+        let jle_invalid = user_code_payload.len();
+        emit_u32!(0u32);
+
+        emit!(0x81, 0x3D);
+        emit_u32!(line_buf_addr);
+        emit_u32!(u32::from_le_bytes([b'c', b'a', b't', b' ']));
+        emit!(0x0F, 0x85);
+        let jne_invalid = user_code_payload.len();
+        emit_u32!(0u32);
+
+        emit!(0xB8);
+        emit_u32!(5u32); // sys_open
+        emit!(0xBB);
+        emit_u32!(line_buf_addr + 4);
+        emit!(0x89, 0xE9);
+        emit!(0x83, 0xE9, 0x04); // len - 4
+        emit!(0xCD, 0x80);
+
+        emit!(0x89, 0xC3); // fd
+        emit!(0xB8);
+        emit_u32!(3u32); // sys_read
+        emit!(0xB9);
+        emit_u32!(buf_addr);
+        emit!(0xBA);
+        emit_u32!(1000u32);
+        emit!(0xCD, 0x80);
+
+        emit!(0x89, 0xC2); // size read
+        emit!(0xB8);
+        emit_u32!(4u32); // sys_write
+        emit!(0xBB);
+        emit_u32!(1u32);
+        emit!(0xB9);
+        emit_u32!(buf_addr);
+        emit!(0xCD, 0x80);
+
+        emit!(0xB8);
+        emit_u32!(4u32); // sys_write newline
+        emit!(0xBB);
+        emit_u32!(1u32);
+        emit!(0xC6, 0x05);
+        emit_u32!(buf_addr);
+        emit!(0x0A);
+        emit!(0xB9);
+        emit_u32!(buf_addr);
+        emit!(0xBA);
+        emit_u32!(1u32);
+        emit!(0xCD, 0x80);
+
+        let invalid_start = user_code_payload.len();
+        let off = (invalid_start as isize - (jle_invalid + 4) as isize) as u32;
+        user_code_payload[jle_invalid..jle_invalid + 4].copy_from_slice(&off.to_le_bytes());
+        let off = (invalid_start as isize - (jne_invalid + 4) as isize) as u32;
+        user_code_payload[jne_invalid..jne_invalid + 4].copy_from_slice(&off.to_le_bytes());
+        let off = (invalid_start as isize - (je_empty + 4) as isize) as u32;
+        user_code_payload[je_empty..je_empty + 4].copy_from_slice(&off.to_le_bytes());
+
+        emit!(0xE9);
+        let current = user_code_payload.len() + 4;
+        emit_u32!((loop_start as isize - current as isize) as u32);
 
         let ptr = 0x40000000 as *mut u8;
         core::ptr::copy_nonoverlapping(user_code_payload.as_ptr(), ptr, user_code_payload.len());
-
-        // Copy filename
-        core::ptr::copy_nonoverlapping(filename.as_ptr(), filename_addr as *mut u8, filename.len());
+        core::ptr::copy_nonoverlapping(prompt.as_ptr(), prompt_addr as *mut u8, prompt.len());
+        core::ptr::copy_nonoverlapping(help_msg.as_ptr(), help_msg_addr as *mut u8, help_msg.len());
+        core::ptr::copy_nonoverlapping(ls_path.as_ptr(), ls_path_addr as *mut u8, ls_path.len());
 
         println!("Successfully deployed user payload to 0x40000000.");
 

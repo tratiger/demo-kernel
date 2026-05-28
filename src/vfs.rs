@@ -19,6 +19,7 @@ pub enum VfsError {
 }
 
 pub type ReadFunction = fn(&VfsNode, usize, &mut [u8]) -> Result<usize, VfsError>;
+pub type ReaddirFunction = fn(&VfsNode, &mut [u8]) -> Result<usize, VfsError>;
 
 #[derive(Clone)]
 pub struct VfsNode {
@@ -27,6 +28,7 @@ pub struct VfsNode {
     pub file_type: FileType,
     pub data_ptr: u32,
     pub read: Option<ReadFunction>,
+    pub readdir: Option<ReaddirFunction>,
 }
 
 impl core::fmt::Debug for VfsNode {
@@ -47,6 +49,17 @@ pub fn mount(node: VfsNode) {
 }
 
 pub fn open(path: &str) -> Result<VfsNode, VfsError> {
+    if path == "/" || path == "." || path == "" {
+        return Ok(VfsNode {
+            name: String::from("/"),
+            size: 0,
+            file_type: FileType::Directory,
+            data_ptr: 0,
+            read: None,
+            readdir: Some(crate::initrd::initrd_readdir),
+        });
+    }
+
     let root = VFS_ROOT.lock();
     for node in root.iter() {
         if node.name == path {
