@@ -155,7 +155,7 @@ pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
 
         // Setup user mode payload string
         let string_payload = b"Hello, World from User Mode!\n";
-        let str_addr: u32 = 0x40000000 + 100; // offset string into the code page
+        let str_addr = 0x40000000 + 100; // offset string into the code page
 
         // Deploy user code payload to 0x40000000
         // We will call sys_write (4) with stdout (1), the string address, and length
