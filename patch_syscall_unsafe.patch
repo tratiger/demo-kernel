@@ -1,0 +1,11 @@
+--- src/syscall.rs
++++ src/syscall.rs
+@@ -1,7 +1,7 @@
+ use crate::println;
+ use crate::serial::SERIAL1;
+
+-#[no_mangle]
++#[unsafe(no_mangle)]
+ pub extern "C" fn syscall_dispatch(num: u32, arg1: u32, arg2: u32, arg3: u32) -> u32 {
+     match num {
+         1 => {

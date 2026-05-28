@@ -103,18 +103,20 @@ pub extern "x86-interrupt" fn page_fault_handler(_frame: InterruptStackFrame, er
 
 #[unsafe(naked)]
 pub unsafe extern "C" fn syscall_stub() {
-    core::arch::naked_asm!(
-        "push edx",
-        "push ecx",
-        "push ebx",
-        "push eax",
-        "call syscall_dispatch",
-        "add esp, 16",
-        "iretd",
-    );
+    unsafe {
+        core::arch::naked_asm!(
+            "push edx",
+            "push ecx",
+            "push ebx",
+            "push eax",
+            "call syscall_dispatch",
+            "add esp, 16",
+            "iretd",
+        );
+    }
 }
 
-unsafe extern "C" {
+extern "C" {
     fn syscall_dispatch(num: u32, arg1: u32, arg2: u32, arg3: u32) -> u32;
 }
 
