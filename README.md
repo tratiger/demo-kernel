@@ -3,6 +3,11 @@
 ## 概要
 i686（32bit）カーネルデモ
 
+## 実行方法
+1. qemu-system-x86導入
+2. rustup component add rust-src
+3. 初期ramとしてinitrd.tarを作成
+4. cargo run
 
 ## 全体章立て
 * 第1章: シリアルログ基盤の構築 
