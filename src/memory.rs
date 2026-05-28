@@ -6,7 +6,7 @@ pub static mut BITMAP: [u8; 131072] = [0; 131072];
 pub const FRAME_SIZE: u32 = 4096;
 pub const TOTAL_FRAMES: usize = 1048576; // 4GB / 4KB
 
-pub unsafe fn init() {
+pub unsafe fn init(initrd_info: Option<(u32, u32)>) {
     // The kernel and initial structures reside in the first 8MB of physical memory.
     // 8MB / 4KB = 2048 frames.
     // We mask the first 2048 frames as "used" so the allocator doesn't hand them out.
@@ -20,6 +20,26 @@ pub unsafe fn init() {
     }
 
     crate::println!("[Memory] Initialized physical frame allocator. First 8MB reserved.");
+
+    if let Some((start, end)) = initrd_info {
+        let start_frame = start / FRAME_SIZE;
+        // round up to the next frame
+        let end_frame = (end + FRAME_SIZE - 1) / FRAME_SIZE;
+
+        for frame in start_frame..end_frame {
+            let byte_index = (frame / 8) as usize;
+            let bit_index = frame % 8;
+            unsafe {
+                let val = core::ptr::read_volatile(&BITMAP[byte_index]);
+                core::ptr::write_volatile(&mut BITMAP[byte_index], val | (1 << bit_index));
+            }
+        }
+        crate::println!(
+            "[Memory] Reserved initrd frames: {} to {}",
+            start_frame,
+            end_frame - 1
+        );
+    }
 }
 
 pub unsafe fn allocate_frame() -> Option<u32> {

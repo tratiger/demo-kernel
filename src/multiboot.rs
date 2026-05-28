@@ -22,13 +22,44 @@ pub struct MemoryMapEntry {
     pub entry_type: u32,
 }
 
-pub fn parse(magic: u32, mbi_ptr: u32) {
+#[repr(C, packed)]
+pub struct MultibootModule {
+    pub mod_start: u32,
+    pub mod_end: u32,
+    pub string: u32,
+    pub reserved: u32,
+}
+
+pub fn parse(magic: u32, mbi_ptr: u32) -> Option<(u32, u32)> {
     if magic != 0x2BADB002 {
         crate::println!("[Multiboot] Invalid magic number: {:#X}", magic);
-        return;
+        return None;
     }
 
     let mbi = unsafe { &*(mbi_ptr as *const MultibootInfo) };
+
+    let mut initrd_info = None;
+
+    // Bit 3 indicates mods_* fields are valid
+    if mbi.flags & (1 << 3) != 0 {
+        let mods_count = mbi.mods_count;
+        let mods_addr = mbi.mods_addr;
+        crate::println!("[Multiboot] Modules detected: {}", mods_count);
+
+        if mods_count > 0 {
+            let module = unsafe { &*(mods_addr as *const MultibootModule) };
+            let start = module.mod_start;
+            let end = module.mod_end;
+            crate::println!(
+                "[Multiboot] Module 0: Start={:#010X}, End={:#010X}",
+                start,
+                end
+            );
+            initrd_info = Some((start, end));
+        }
+    } else {
+        crate::println!("[Multiboot] No modules provided.");
+    }
 
     // Bit 6 indicates mmap_* fields are valid
     let flags = mbi.flags;
@@ -65,4 +96,6 @@ pub fn parse(magic: u32, mbi_ptr: u32) {
     } else {
         crate::println!("[Multiboot] No memory map provided.");
     }
+
+    initrd_info
 }
