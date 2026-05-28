@@ -92,7 +92,7 @@ pub unsafe fn map_page(virt_addr: u32, phys_addr: u32, flags: u32) {
     let pt_phys = if (pde & 1) == 0 {
         // Page table not present, allocate a new frame
         let new_frame = unsafe {
-            crate::memory::allocate_frame().expect("Out of memory when allocating page table!")
+            crate::mm::memory::allocate_frame().expect("Out of memory when allocating page table!")
         };
 
         // Clear the new page table

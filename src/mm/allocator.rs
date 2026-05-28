@@ -159,13 +159,13 @@ pub const HEAP_START: usize = 0x10000000;
 pub const HEAP_SIZE: usize = 1 * 1024 * 1024;
 
 pub unsafe fn init_heap() {
-    let pages = HEAP_SIZE / crate::paging::PAGE_SIZE as usize;
+    let pages = HEAP_SIZE / crate::arch::paging::PAGE_SIZE as usize;
     for i in 0..pages {
         let phys_frame = unsafe {
-            crate::memory::allocate_frame().expect("No physical frames available for heap")
+            crate::mm::memory::allocate_frame().expect("No physical frames available for heap")
         };
-        let virt_addr = HEAP_START + (i * crate::paging::PAGE_SIZE as usize);
-        unsafe { crate::paging::map_page(virt_addr as u32, phys_frame, 3) }; // Present | R/W
+        let virt_addr = HEAP_START + (i * crate::arch::paging::PAGE_SIZE as usize);
+        unsafe { crate::arch::paging::map_page(virt_addr as u32, phys_frame, 3) }; // Present | R/W
     }
 
     // Initialize the dummy allocator list with the full mapped region

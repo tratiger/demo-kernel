@@ -140,7 +140,7 @@ pub fn init_idt() {
     }
 }
 
-use crate::port::Port;
+use crate::arch::port::Port;
 
 pub const PIC1_COMMAND: Port = Port::new(0x20);
 pub const PIC1_DATA: Port = Port::new(0x21);
@@ -196,7 +196,7 @@ pub extern "x86-interrupt" fn timer_interrupt_handler(_frame: InterruptStackFram
 }
 
 pub extern "x86-interrupt" fn keyboard_interrupt_handler(_frame: InterruptStackFrame) {
-    let scancode: u8 = unsafe { crate::port::Port::new(0x60).read() };
-    crate::keyboard::push_scancode(scancode);
+    let scancode: u8 = unsafe { crate::arch::port::Port::new(0x60).read() };
+    crate::drivers::char::keyboard::push_scancode(scancode);
     send_eoi(PIC1_OFFSET + 1);
 }
