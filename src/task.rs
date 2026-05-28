@@ -94,13 +94,14 @@ pub fn spawn(entry_point: fn()) {
     let mut thread = Box::new(Thread::new(id));
 
     // Allocate 4KB stack
-    let mut stack = Vec::<u8>::with_capacity(4096);
-    unsafe { stack.set_len(4096); }
+    let mut stack = Vec::<u8>::new();
+    stack.resize(4096, 0);
 
     let stack_end = stack.as_ptr() as u32 + 4096;
     let aligned_stack_end = stack_end & !3; // Align to 4 bytes
 
-    let context_ptr = (aligned_stack_end - core::mem::size_of::<TaskContext>() as u32) as *mut TaskContext;
+    let context_ptr =
+        (aligned_stack_end - core::mem::size_of::<TaskContext>() as u32) as *mut TaskContext;
 
     unsafe {
         *context_ptr = TaskContext {
@@ -130,7 +131,10 @@ pub fn yield_task() {
     current.state = ThreadState::Ready;
 
     // Get the next thread
-    let mut next = sched.ready_queue.pop_front().expect("Ready queue is empty!");
+    let mut next = sched
+        .ready_queue
+        .pop_front()
+        .expect("Ready queue is empty!");
     next.state = ThreadState::Running;
 
     let old_esp_ptr = &mut current.stack_ptr as *mut u32;
@@ -145,4 +149,28 @@ pub fn yield_task() {
     unsafe {
         switch_to(old_esp_ptr, new_esp);
     }
+}
+
+#[unsafe(naked)]
+pub unsafe extern "C" fn jump_to_usermode(user_eip: u32, user_esp: u32) -> ! {
+    core::arch::naked_asm!(
+        // 1. Fetch parameters into scratch registers before touching the stack.
+        // In cdecl: [esp] is Return Address, [esp+4] is user_eip, [esp+8] is user_esp
+        "mov eax, [esp + 4]", // eax = user_eip
+        "mov ecx, [esp + 8]", // ecx = user_esp
+        // 2. Clear out/set up data segments with the user data selector (RPL=3)
+        "mov dx, 0x23",
+        "mov ds, dx",
+        "mov es, dx",
+        "mov fs, dx",
+        "mov gs, dx",
+        // 3. Construct the IRET stack frame from BOTTOM to TOP
+        "push 0x23",  // SS (User Data Selector, RPL=3)
+        "push ecx",   // ESP (User Stack Pointer)
+        "push 0x002", // EFLAGS (IF=0 to keep interrupts disabled for now)
+        "push 0x1B",  // CS (User Code Selector, RPL=3)
+        "push eax",   // EIP (User Entry Point)
+        // 4. Execute the transition
+        "iretd"
+    );
 }

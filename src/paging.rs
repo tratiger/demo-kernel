@@ -1,6 +1,7 @@
 use core::arch::asm;
 
 pub const PAGE_SIZE: u32 = 4096;
+pub const USER_ACCESSIBLE: u32 = 1 << 2;
 
 #[repr(C, align(4096))]
 pub struct PageDirectory {
@@ -14,17 +15,13 @@ pub struct PageTable {
 
 impl PageDirectory {
     pub const fn new() -> Self {
-        PageDirectory {
-            entries: [0; 1024],
-        }
+        PageDirectory { entries: [0; 1024] }
     }
 }
 
 impl PageTable {
     pub const fn new() -> Self {
-        PageTable {
-            entries: [0; 1024],
-        }
+        PageTable { entries: [0; 1024] }
     }
 }
 
@@ -79,18 +76,24 @@ pub unsafe fn map_page(virt_addr: u32, phys_addr: u32, flags: u32) {
     let pde = unsafe { (*pd_ptr).entries[pd_index] };
 
     let mut cr0: u32;
-    unsafe { asm!("mov {}, cr0", out(reg) cr0, options(nomem, nostack, preserves_flags)); }
+    unsafe {
+        asm!("mov {}, cr0", out(reg) cr0, options(nomem, nostack, preserves_flags));
+    }
     let paging_enabled = (cr0 & 0x80000000) != 0;
 
     if paging_enabled {
         // Temporarily disable paging to write to physical memory > 8MB
         let cr0_disabled = cr0 & !0x80000000;
-        unsafe { asm!("mov cr0, {}", in(reg) cr0_disabled, options(nostack, preserves_flags)); }
+        unsafe {
+            asm!("mov cr0, {}", in(reg) cr0_disabled, options(nostack, preserves_flags));
+        }
     }
 
     let pt_phys = if (pde & 1) == 0 {
         // Page table not present, allocate a new frame
-        let new_frame = unsafe { crate::memory::allocate_frame().expect("Out of memory when allocating page table!") };
+        let new_frame = unsafe {
+            crate::memory::allocate_frame().expect("Out of memory when allocating page table!")
+        };
 
         // Clear the new page table
         let pt_ptr = new_frame as *mut PageTable;
@@ -99,7 +102,9 @@ pub unsafe fn map_page(virt_addr: u32, phys_addr: u32, flags: u32) {
         }
 
         // Add the new page table to the page directory (Present, R/W)
-        unsafe { (*pd_ptr).entries[pd_index] = new_frame | 3; }
+        unsafe {
+            (*pd_ptr).entries[pd_index] = new_frame | 3 | (flags & USER_ACCESSIBLE);
+        }
         new_frame
     } else {
         pde & 0xFFFFF000
@@ -113,7 +118,9 @@ pub unsafe fn map_page(virt_addr: u32, phys_addr: u32, flags: u32) {
 
     if paging_enabled {
         // Re-enable paging
-        unsafe { asm!("mov cr0, {}", in(reg) cr0, options(nostack, preserves_flags)); }
+        unsafe {
+            asm!("mov cr0, {}", in(reg) cr0, options(nostack, preserves_flags));
+        }
     }
 
     // Flush TLB

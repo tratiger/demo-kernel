@@ -52,8 +52,12 @@ pub fn parse(magic: u32, mbi_ptr: u32) {
                 _ => "Reserved",
             };
 
-            crate::println!("MMAP: Base={:#010X}, Length={:#010X}, Type={}",
-                base_addr_low, length_low, type_str);
+            crate::println!(
+                "MMAP: Base={:#010X}, Length={:#010X}, Type={}",
+                base_addr_low,
+                length_low,
+                type_str
+            );
 
             // size field does not include the size field itself (which is 4 bytes)
             current_addr += size + 4;

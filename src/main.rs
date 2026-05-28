@@ -5,20 +5,20 @@
 
 extern crate alloc;
 
-use core::panic::PanicInfo;
 use alloc::boxed::Box;
-use alloc::vec::Vec;
 use alloc::format;
+use alloc::vec::Vec;
+use core::panic::PanicInfo;
 
+mod allocator;
+mod gdt;
+mod interrupts;
+mod mem;
+mod memory;
+mod multiboot;
+mod paging;
 mod port;
 mod serial;
-mod gdt;
-mod mem;
-mod interrupts;
-mod multiboot;
-mod memory;
-mod paging;
-mod allocator;
 pub mod task;
 
 #[panic_handler]
@@ -37,8 +37,8 @@ const CHECKSUM: u32 = -(MAGIC as i32 + FLAGS as i32) as u32;
 core::arch::global_asm!(
     ".section .multiboot_header",
     ".align 4",
-    ".long 0x1BADB002", // MAGIC
-    ".long 0x00000003", // FLAGS (ALIGN | MEMINFO)
+    ".long 0x1BADB002",  // MAGIC
+    ".long 0x00000003",  // FLAGS (ALIGN | MEMINFO)
     ".long -0x1BADB005", // CHECKSUM
     ".section .bss",
     ".align 16",
@@ -119,7 +119,10 @@ pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
     for i in 0..100 {
         v.push(i);
     }
-    println!("Vec allocated and pushed 100 elements. Last element: {}", v[99]);
+    println!(
+        "Vec allocated and pushed 100 elements. Last element: {}",
+        v[99]
+    );
 
     println!("Testing format!");
     // String formatting uses alloc under the hood
@@ -128,54 +131,40 @@ pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
     // Explicitly write string slice to our serial macro
     crate::println!("Formatted String: {}", s.as_str());
 
-    println!("Testing dynamic memory mapping...");
-    unsafe {
-        // Map virtual address 0x40000000 to a new physical frame
-        let new_frame = crate::memory::allocate_frame().unwrap();
-        crate::paging::map_page(0x40000000, new_frame, 0x3); // Present | R/W
-
-        // Read and write to it
-        let ptr = 0x40000000 as *mut u32;
-        *ptr = 0x12345678;
-        println!("Successfully wrote to mapped memory. Read back: {:#X}", *ptr);
-    }
-
-    // NOTE: Commenting out page fault test to allow OS to continue running
-    // println!("Testing Page Fault Exception (Accessing unmapped memory at 0x50000000)...");
-    // unsafe {
-    //     let ptr = 0x50000000 as *mut u32;
-    //     let _val = core::ptr::read_volatile(ptr);
-    //     println!("ERROR: Should not reach this line! Value read: {:#X}", _val);
-    // }
-
     println!("Initializing Scheduler...");
     task::init();
 
-    println!("Spawning Threads...");
-    task::spawn(thread_a);
-    task::spawn(thread_b);
+    println!("Testing dynamic memory mapping with user privilege...");
+    unsafe {
+        // Map virtual address 0x40000000 to a new physical frame (User Code)
+        let new_frame_code = crate::memory::allocate_frame().unwrap();
+        crate::paging::map_page(
+            0x40000000,
+            new_frame_code,
+            0x3 | crate::paging::USER_ACCESSIBLE,
+        );
 
-    println!("Starting Multitasking...");
-    loop {
-        task::yield_task();
-        // Give CPU a tiny break when idle
-        unsafe {
-            core::arch::asm!("hlt", options(nomem, nostack));
-        }
-    }
-}
+        // Map virtual address 0xA0000000 to a new physical frame (User Stack)
+        let new_frame_stack = crate::memory::allocate_frame().unwrap();
+        crate::paging::map_page(
+            0xA0000000,
+            new_frame_stack,
+            0x3 | crate::paging::USER_ACCESSIBLE,
+        );
 
-fn thread_a() {
-    loop {
-        crate::println!("Hello from Thread A!");
-        // We delay a bit inside the serial print or just directly yield
-        task::yield_task();
-    }
-}
+        // Deploy user code payload to 0x40000000
+        // mov eax, [0x00100000] (5 bytes: A1 00 00 10 00)
+        // jmp $ (infinite loop)  (2 bytes: EB FE)
+        let user_code_payload: [u8; 7] = [0xA1, 0x00, 0x00, 0x10, 0x00, 0xEB, 0xFE];
+        let ptr = 0x40000000 as *mut u8;
+        core::ptr::copy_nonoverlapping(user_code_payload.as_ptr(), ptr, user_code_payload.len());
 
-fn thread_b() {
-    loop {
-        crate::println!("Hello from Thread B!");
-        task::yield_task();
+        println!("Successfully deployed user payload to 0x40000000.");
+
+        println!("Jumping to usermode...");
+        task::jump_to_usermode(0x40000000, 0xA0004000);
     }
+
+    // We should not reach here since we jump to usermode
+    loop {}
 }
