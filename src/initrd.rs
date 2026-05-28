@@ -90,6 +90,7 @@ pub fn init(start_addr: u32, end_addr: u32) {
             file_type,
             data_ptr,
             read: Some(initrd_read),
+            readdir: None,
         };
         mount(node);
 
@@ -97,6 +98,25 @@ pub fn init(start_addr: u32, end_addr: u32) {
         let data_blocks = (size + 511) / 512;
         current_addr += 512 + (data_blocks as u32 * 512);
     }
+}
+
+pub fn initrd_readdir(_node: &VfsNode, buffer: &mut [u8]) -> Result<usize, VfsError> {
+    let mut bytes_written = 0;
+    let root = crate::vfs::VFS_ROOT.lock();
+
+    for file_node in root.iter() {
+        let name_bytes = file_node.name.as_bytes();
+        let len = name_bytes.len();
+
+        if bytes_written + len + 1 > buffer.len() {
+            break;
+        }
+
+        buffer[bytes_written..bytes_written + len].copy_from_slice(name_bytes);
+        buffer[bytes_written + len] = 0;
+        bytes_written += len + 1;
+    }
+    Ok(bytes_written)
 }
 
 fn initrd_read(node: &VfsNode, offset: usize, buffer: &mut [u8]) -> Result<usize, VfsError> {
