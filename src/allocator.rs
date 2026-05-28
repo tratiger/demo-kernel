@@ -14,7 +14,10 @@ pub struct DummyAllocator {
 impl DummyAllocator {
     pub const fn new() -> Self {
         Self {
-            head: Node { size: 0, next: None },
+            head: Node {
+                size: 0,
+                next: None,
+            },
         }
     }
 
@@ -96,7 +99,11 @@ impl DummyAllocator {
 
         // Insert new_node_ptr between current and next
         unsafe {
-            (*new_node_ptr).next = if let Some(n) = next { Some(&mut *n) } else { None };
+            (*new_node_ptr).next = if let Some(n) = next {
+                Some(&mut *n)
+            } else {
+                None
+            };
             (*current).next = Some(&mut *new_node_ptr);
         }
 
@@ -154,7 +161,9 @@ pub const HEAP_SIZE: usize = 1 * 1024 * 1024;
 pub unsafe fn init_heap() {
     let pages = HEAP_SIZE / crate::paging::PAGE_SIZE as usize;
     for i in 0..pages {
-        let phys_frame = unsafe { crate::memory::allocate_frame().expect("No physical frames available for heap") };
+        let phys_frame = unsafe {
+            crate::memory::allocate_frame().expect("No physical frames available for heap")
+        };
         let virt_addr = HEAP_START + (i * crate::paging::PAGE_SIZE as usize);
         unsafe { crate::paging::map_page(virt_addr as u32, phys_frame, 3) }; // Present | R/W
     }

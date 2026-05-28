@@ -69,7 +69,10 @@ pub extern "x86-interrupt" fn breakpoint_handler(_frame: InterruptStackFrame) {
     crate::println!("EXCEPTION: BREAKPOINT");
 }
 
-pub extern "x86-interrupt" fn double_fault_handler(_frame: InterruptStackFrame, error_code: u32) -> ! {
+pub extern "x86-interrupt" fn double_fault_handler(
+    _frame: InterruptStackFrame,
+    error_code: u32,
+) -> ! {
     crate::println!("EXCEPTION: DOUBLE FAULT\nError Code: {:#X}", error_code);
     loop {
         unsafe { core::arch::asm!("hlt", options(nomem, nostack)) };
@@ -81,7 +84,11 @@ pub extern "x86-interrupt" fn page_fault_handler(_frame: InterruptStackFrame, er
     unsafe {
         core::arch::asm!("mov {}, cr2", out(reg) cr2, options(nomem, nostack, preserves_flags));
     }
-    crate::println!("PAGE FAULT at address: {:#X} (Error Code: {:#X})", cr2, error_code);
+    crate::println!(
+        "PAGE FAULT at address: {:#X} (Error Code: {:#X})",
+        cr2,
+        error_code
+    );
     loop {
         unsafe { core::arch::asm!("hlt", options(nomem, nostack)) };
     }
@@ -94,8 +101,10 @@ pub fn init_idt() {
         IDT.entries[3].set_handler_fn(breakpoint_handler as *const () as u32);
         IDT.entries[8].set_handler_fn(double_fault_handler as *const () as u32);
         IDT.entries[14].set_handler_fn(page_fault_handler as *const () as u32);
-        IDT.entries[PIC1_OFFSET as usize].set_handler_fn(timer_interrupt_handler as *const () as u32);
-        IDT.entries[PIC1_OFFSET as usize + 1].set_handler_fn(keyboard_interrupt_handler as *const () as u32);
+        IDT.entries[PIC1_OFFSET as usize]
+            .set_handler_fn(timer_interrupt_handler as *const () as u32);
+        IDT.entries[PIC1_OFFSET as usize + 1]
+            .set_handler_fn(keyboard_interrupt_handler as *const () as u32);
 
         let idt_ptr = IdtPointer {
             limit: (core::mem::size_of::<InterruptDescriptorTable>() - 1) as u16,

@@ -53,6 +53,8 @@ pub unsafe fn deallocate_frame(phys_addr: u32) {
 
     if byte_index < len {
         let val = unsafe { core::ptr::read_volatile(&(*bitmap_ptr)[byte_index]) };
-        unsafe { core::ptr::write_volatile(&mut (*bitmap_ptr)[byte_index], val & !(1 << bit_index)) };
+        unsafe {
+            core::ptr::write_volatile(&mut (*bitmap_ptr)[byte_index], val & !(1 << bit_index))
+        };
     }
 }
