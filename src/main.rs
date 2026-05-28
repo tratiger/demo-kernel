@@ -10,20 +10,12 @@ use alloc::format;
 use alloc::vec::Vec;
 use core::panic::PanicInfo;
 
-mod allocator;
-mod gdt;
-pub mod initrd;
-mod interrupts;
-pub mod keyboard;
-mod mem;
-mod memory;
+pub mod arch;
+pub mod drivers;
+pub mod fs;
+pub mod kernel;
+pub mod mm;
 mod multiboot;
-mod paging;
-mod port;
-mod serial;
-mod syscall;
-pub mod task;
-pub mod vfs;
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -66,19 +58,19 @@ core::arch::global_asm!(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
-    crate::serial::SERIAL1.lock().init();
+    crate::drivers::char::serial::SERIAL1.lock().init();
 
     let initrd_info = crate::multiboot::parse(magic, mbi_ptr);
 
-    unsafe { crate::memory::init(initrd_info) };
-    unsafe { crate::paging::init() };
+    unsafe { crate::mm::memory::init(initrd_info) };
+    unsafe { crate::arch::paging::init() };
 
     println!("Loading GDT...");
-    gdt::init();
+    crate::arch::gdt::init();
     println!("GDT Loaded Successfully!");
 
     println!("Loading IDT...");
-    interrupts::init_idt();
+    crate::arch::interrupts::init_idt();
     println!("IDT Loaded Successfully!");
 
     println!("Testing Breakpoint...");
@@ -87,7 +79,7 @@ pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
     }
 
     println!("Initializing PIC...");
-    interrupts::init_pic();
+    crate::arch::interrupts::init_pic();
     println!("PIC Initialized!");
 
     println!("Enabling Interrupts...");
@@ -98,11 +90,11 @@ pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
     println!("Hello, Rust OS World! Hex: {:#X}", 0xDEADBEEFu32);
 
     println!("Initializing Heap...");
-    unsafe { crate::allocator::init_heap() };
+    unsafe { crate::mm::allocator::init_heap() };
     println!("Heap Initialized!");
 
     if let Some((start, end)) = initrd_info {
-        crate::initrd::init(start, end);
+        crate::drivers::fs::initrd::init(start, end);
     }
 
     println!("Starting fragmentation stress test...");
@@ -140,33 +132,33 @@ pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
     crate::println!("Formatted String: {}", s.as_str());
 
     println!("Initializing Scheduler...");
-    task::init();
+    crate::kernel::task::init();
 
     println!("Testing dynamic memory mapping with user privilege...");
     unsafe {
-        for i in 0..10 {
-            let frame = crate::memory::allocate_frame().unwrap();
-            crate::paging::map_page(
+        for i in 0..40 {
+            let frame = crate::mm::memory::allocate_frame().unwrap();
+            crate::arch::paging::map_page(
                 0x40000000 + i * 4096,
                 frame,
-                0x3 | crate::paging::USER_ACCESSIBLE,
+                0x3 | crate::arch::paging::USER_ACCESSIBLE,
             );
         }
-        for i in 0..10 {
-            let frame = crate::memory::allocate_frame().unwrap();
-            crate::paging::map_page(
+        for i in 0..40 {
+            let frame = crate::mm::memory::allocate_frame().unwrap();
+            crate::arch::paging::map_page(
                 0xA0000000 - i * 4096,
                 frame,
-                0x3 | crate::paging::USER_ACCESSIBLE,
+                0x3 | crate::arch::paging::USER_ACCESSIBLE,
             );
         }
 
         // Map virtual address 0xA0000000 to a new physical frame (User Stack)
-        let new_frame_stack = crate::memory::allocate_frame().unwrap();
-        crate::paging::map_page(
-            0xA0000000,
+        let new_frame_stack = crate::mm::memory::allocate_frame().unwrap();
+        crate::arch::paging::map_page(
+            0xA0003000,
             new_frame_stack,
-            0x3 | crate::paging::USER_ACCESSIBLE,
+            0x3 | crate::arch::paging::USER_ACCESSIBLE,
         );
 
         // Setup interactive shell payload
@@ -465,7 +457,7 @@ pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
         println!("Successfully deployed user payload to 0x40000000.");
 
         println!("Jumping to usermode...");
-        task::jump_to_usermode(0x40000000, 0xA0004000);
+        crate::kernel::task::jump_to_usermode(0x40000000, 0xA0004000);
     }
 
     // We should not reach here since we jump to usermode

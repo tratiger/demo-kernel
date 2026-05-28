@@ -1,4 +1,4 @@
-use crate::port::Port;
+use crate::arch::port::Port;
 
 pub struct SerialPort {
     data_port: Port,
@@ -77,7 +77,7 @@ pub static SERIAL1: spin::Mutex<SerialPort> = spin::Mutex::new(SerialPort::new(0
 #[macro_export]
 macro_rules! print {
     ($($arg:tt)*) => {
-        $crate::serial::_print(format_args!($($arg)*));
+        $crate::drivers::char::serial::_print(format_args!($($arg)*));
     };
 }
 

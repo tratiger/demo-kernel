@@ -1,0 +1,1 @@
+// Pure architecture specific types
