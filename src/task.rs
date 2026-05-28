@@ -20,27 +20,37 @@ pub enum ThreadState {
     Exited,
 }
 
+use crate::vfs::VfsNode;
+
 pub struct Thread {
     id: usize,
     pub stack_ptr: u32,
     stack_allocated: Vec<u8>,
     state: ThreadState,
+    pub file_descriptors: Vec<Option<(VfsNode, usize)>>,
 }
 
 impl Thread {
     pub fn new(id: usize) -> Self {
+        // Pre-allocate FDs 0, 1, and 2 as reserved/empty for now
+        let mut fds = Vec::new();
+        fds.push(None); // 0: stdin
+        fds.push(None); // 1: stdout
+        fds.push(None); // 2: stderr
+
         Self {
             id,
             stack_ptr: 0,
             stack_allocated: Vec::new(),
             state: ThreadState::Ready,
+            file_descriptors: fds,
         }
     }
 }
 
 pub struct Scheduler {
     ready_queue: VecDeque<Box<Thread>>,
-    current_thread: Option<Box<Thread>>,
+    pub current_thread: Option<Box<Thread>>,
     next_id: usize,
 }
 

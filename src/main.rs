@@ -12,6 +12,7 @@ use core::panic::PanicInfo;
 
 mod allocator;
 mod gdt;
+pub mod initrd;
 mod interrupts;
 mod mem;
 mod memory;
@@ -21,6 +22,7 @@ mod port;
 mod serial;
 mod syscall;
 pub mod task;
+pub mod vfs;
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -65,9 +67,9 @@ core::arch::global_asm!(
 pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
     crate::serial::SERIAL1.lock().init();
 
-    crate::multiboot::parse(magic, mbi_ptr);
+    let initrd_info = crate::multiboot::parse(magic, mbi_ptr);
 
-    unsafe { crate::memory::init() };
+    unsafe { crate::memory::init(initrd_info) };
     unsafe { crate::paging::init() };
 
     println!("Loading GDT...");
@@ -97,6 +99,10 @@ pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
     println!("Initializing Heap...");
     unsafe { crate::allocator::init_heap() };
     println!("Heap Initialized!");
+
+    if let Some((start, end)) = initrd_info {
+        crate::initrd::init(start, end);
+    }
 
     println!("Starting fragmentation stress test...");
     for i in 0..1000 {
@@ -157,21 +163,52 @@ pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
         let string_payload = b"Hello, World from User Mode!\n";
         let str_addr: u32 = 0x40000000 + 100; // offset string into the code page
 
-        // Deploy user code payload to 0x40000000
-        // We will call sys_write (4) with stdout (1), the string address, and length
-        // Then sys_exit (1) with code 0
+        let filename = b"test.txt";
+        let filename_addr: u32 = 0x40000000 + 100;
+        let buf_addr: u32 = 0x40000000 + 200;
 
         let mut user_code_payload = Vec::new();
-        // sys_write
-        user_code_payload.push(0xB8); user_code_payload.extend_from_slice(&4u32.to_le_bytes()); // mov eax, 4
-        user_code_payload.push(0xBB); user_code_payload.extend_from_slice(&1u32.to_le_bytes()); // mov ebx, 1
-        user_code_payload.push(0xB9); user_code_payload.extend_from_slice(&str_addr.to_le_bytes()); // mov ecx, str_addr
-        user_code_payload.push(0xBA); user_code_payload.extend_from_slice(&(string_payload.len() as u32).to_le_bytes()); // mov edx, len
+
+        // 1. sys_open (eax=5, ebx=filename_addr, ecx=filename.len())
+        user_code_payload.push(0xB8);
+        user_code_payload.extend_from_slice(&5u32.to_le_bytes()); // mov eax, 5
+        user_code_payload.push(0xBB);
+        user_code_payload.extend_from_slice(&filename_addr.to_le_bytes()); // mov ebx, filename_addr
+        user_code_payload.push(0xB9);
+        user_code_payload.extend_from_slice(&(filename.len() as u32).to_le_bytes()); // mov ecx, len
         user_code_payload.extend_from_slice(&[0xCD, 0x80]); // int 0x80
 
-        // sys_exit
-        user_code_payload.push(0xB8); user_code_payload.extend_from_slice(&1u32.to_le_bytes()); // mov eax, 1
-        user_code_payload.push(0xBB); user_code_payload.extend_from_slice(&0u32.to_le_bytes()); // mov ebx, 0
+        // save FD returned in eax -> ebx for sys_read
+        user_code_payload.push(0x89);
+        user_code_payload.push(0xC3); // mov ebx, eax
+
+        // 2. sys_read (eax=3, ebx=fd, ecx=buf_addr, edx=50 (max size))
+        user_code_payload.push(0xB8);
+        user_code_payload.extend_from_slice(&3u32.to_le_bytes()); // mov eax, 3
+        user_code_payload.push(0xB9);
+        user_code_payload.extend_from_slice(&buf_addr.to_le_bytes()); // mov ecx, buf_addr
+        user_code_payload.push(0xBA);
+        user_code_payload.extend_from_slice(&50u32.to_le_bytes()); // mov edx, 50
+        user_code_payload.extend_from_slice(&[0xCD, 0x80]); // int 0x80
+
+        // save bytes read returned in eax -> edx for sys_write
+        user_code_payload.push(0x89);
+        user_code_payload.push(0xC2); // mov edx, eax
+
+        // 3. sys_write (eax=4, ebx=1 (stdout), ecx=buf_addr, edx=bytes_read)
+        user_code_payload.push(0xB8);
+        user_code_payload.extend_from_slice(&4u32.to_le_bytes()); // mov eax, 4
+        user_code_payload.push(0xBB);
+        user_code_payload.extend_from_slice(&1u32.to_le_bytes()); // mov ebx, 1
+        user_code_payload.push(0xB9);
+        user_code_payload.extend_from_slice(&buf_addr.to_le_bytes()); // mov ecx, buf_addr
+        user_code_payload.extend_from_slice(&[0xCD, 0x80]); // int 0x80
+
+        // 4. sys_exit
+        user_code_payload.push(0xB8);
+        user_code_payload.extend_from_slice(&1u32.to_le_bytes()); // mov eax, 1
+        user_code_payload.push(0xBB);
+        user_code_payload.extend_from_slice(&0u32.to_le_bytes()); // mov ebx, 0
         user_code_payload.extend_from_slice(&[0xCD, 0x80]); // int 0x80
 
         // Just in case, loop
@@ -180,8 +217,8 @@ pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
         let ptr = 0x40000000 as *mut u8;
         core::ptr::copy_nonoverlapping(user_code_payload.as_ptr(), ptr, user_code_payload.len());
 
-        // Copy string
-        core::ptr::copy_nonoverlapping(string_payload.as_ptr(), str_addr as *mut u8, string_payload.len());
+        // Copy filename
+        core::ptr::copy_nonoverlapping(filename.as_ptr(), filename_addr as *mut u8, filename.len());
 
         println!("Successfully deployed user payload to 0x40000000.");
 
