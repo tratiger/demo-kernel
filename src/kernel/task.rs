@@ -2,67 +2,9 @@ use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 use spin::Mutex;
-
-#[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
-pub struct TaskContext {
-    edi: u32,
-    esi: u32,
-    ebx: u32,
-    ebp: u32,
-    eip: u32,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum ThreadState {
-    Ready,
-    Running,
-    Exited,
-}
-
+use crate::arch::types::TaskContext;
+use crate::kernel::types::{Thread, ThreadState, Scheduler};
 use crate::fs::types::VfsNode;
-
-pub struct Thread {
-    id: usize,
-    pub stack_ptr: u32,
-    stack_allocated: Vec<u8>,
-    state: ThreadState,
-    pub file_descriptors: Vec<Option<(VfsNode, usize)>>,
-}
-
-impl Thread {
-    pub fn new(id: usize) -> Self {
-        // Pre-allocate FDs 0, 1, and 2 as reserved/empty for now
-        let mut fds = Vec::new();
-        fds.push(None); // 0: stdin
-        fds.push(None); // 1: stdout
-        fds.push(None); // 2: stderr
-
-        Self {
-            id,
-            stack_ptr: 0,
-            stack_allocated: Vec::new(),
-            state: ThreadState::Ready,
-            file_descriptors: fds,
-        }
-    }
-}
-
-pub struct Scheduler {
-    ready_queue: VecDeque<Box<Thread>>,
-    pub current_thread: Option<Box<Thread>>,
-    next_id: usize,
-}
-
-impl Scheduler {
-    pub const fn new() -> Self {
-        Self {
-            ready_queue: VecDeque::new(),
-            current_thread: None,
-            next_id: 1, // 0 is reserved for the main thread
-        }
-    }
-}
 
 pub static SCHEDULER: Mutex<Scheduler> = Mutex::new(Scheduler::new());
 
@@ -92,6 +34,37 @@ pub unsafe extern "C" fn switch_to(old_esp: *mut u32, new_esp: u32) {
 pub fn init() {
     let mut sched = SCHEDULER.lock();
     let mut main_thread = Box::new(Thread::new(0));
+
+    // Inject STDIN and STDOUT using CharDeviceAdapter
+    use crate::drivers::fs::char_adapter::CharDeviceAdapter;
+    use alloc::sync::Arc;
+    use crate::drivers::char::stdio::Stdio;
+    use crate::fs::types::FileType;
+    use alloc::string::String;
+
+    let stdio_ops = Arc::new(CharDeviceAdapter {
+        device: Arc::new(Stdio),
+    });
+
+    let stdin_node = VfsNode {
+        name: String::from("stdin"),
+        size: 0,
+        file_type: FileType::File,
+        data_ptr: 0,
+        ops: Some(stdio_ops.clone()),
+    };
+
+    let stdout_node = VfsNode {
+        name: String::from("stdout"),
+        size: 0,
+        file_type: FileType::File,
+        data_ptr: 0,
+        ops: Some(stdio_ops.clone()),
+    };
+
+    main_thread.file_descriptors[0] = Some((stdin_node, 0));
+    main_thread.file_descriptors[1] = Some((stdout_node, 0));
+
     main_thread.state = ThreadState::Running;
     sched.current_thread = Some(main_thread);
 }

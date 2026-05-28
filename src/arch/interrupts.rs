@@ -1,76 +1,4 @@
-#[derive(Debug, Clone, Copy)]
-#[repr(C, packed)]
-pub struct IdtEntry {
-    offset_low: u16,
-    selector: u16,
-    zero: u8,
-    type_attr: u8,
-    offset_high: u16,
-}
-
-impl IdtEntry {
-    pub const fn new() -> Self {
-        IdtEntry {
-            offset_low: 0,
-            selector: 0,
-            zero: 0,
-            type_attr: 0,
-            offset_high: 0,
-        }
-    }
-
-    pub fn set_handler_fn(&mut self, handler: u32) {
-        self.offset_low = handler as u16;
-        self.offset_high = (handler >> 16) as u16;
-        self.selector = 0x08; // Code segment from GDT
-        self.type_attr = 0x8E; // Present, Ring 0, 32-bit Interrupt Gate
-    }
-
-    pub fn set_handler_fn_trap_user(&mut self, handler: u32) {
-        self.offset_low = handler as u16;
-        self.offset_high = (handler >> 16) as u16;
-        self.selector = 0x08; // Code segment from GDT
-        self.type_attr = 0xEF; // Present, Ring 3 (DPL=3), System=0, 32-bit Trap Gate
-    }
-}
-
-#[derive(Debug, Clone)]
-#[repr(C)]
-pub struct InterruptDescriptorTable {
-    entries: [IdtEntry; 256],
-}
-
-impl InterruptDescriptorTable {
-    pub const fn new() -> Self {
-        InterruptDescriptorTable {
-            entries: [IdtEntry::new(); 256],
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-#[repr(C, packed)]
-pub struct IdtPointer {
-    limit: u16,
-    base: u32,
-}
-
-impl IdtPointer {
-    pub fn new(idt: &InterruptDescriptorTable) -> Self {
-        IdtPointer {
-            limit: (core::mem::size_of::<InterruptDescriptorTable>() - 1) as u16,
-            base: idt as *const _ as u32,
-        }
-    }
-}
-
-#[derive(Debug)]
-#[repr(C)]
-pub struct InterruptStackFrame {
-    pub ip: u32,
-    pub cs: u32,
-    pub flags: u32,
-}
+use crate::arch::types::{IdtEntry, InterruptDescriptorTable, IdtPointer, InterruptStackFrame};
 
 pub extern "x86-interrupt" fn breakpoint_handler(_frame: InterruptStackFrame) {
     crate::println!("EXCEPTION: BREAKPOINT");
@@ -140,7 +68,7 @@ pub fn init_idt() {
     }
 }
 
-use crate::arch::port::Port;
+use crate::arch::types::Port;
 
 pub const PIC1_COMMAND: Port = Port::new(0x20);
 pub const PIC1_DATA: Port = Port::new(0x21);
@@ -196,7 +124,7 @@ pub extern "x86-interrupt" fn timer_interrupt_handler(_frame: InterruptStackFram
 }
 
 pub extern "x86-interrupt" fn keyboard_interrupt_handler(_frame: InterruptStackFrame) {
-    let scancode: u8 = unsafe { crate::arch::port::Port::new(0x60).read() };
+    let scancode: u8 = unsafe { crate::arch::types::Port::new(0x60).read() };
     crate::drivers::char::keyboard::push_scancode(scancode);
     send_eoi(PIC1_OFFSET + 1);
 }

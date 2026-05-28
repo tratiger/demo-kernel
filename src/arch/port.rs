@@ -1,14 +1,7 @@
 use core::arch::asm;
-
-pub struct Port {
-    port: u16,
-}
+use crate::arch::types::Port;
 
 impl Port {
-    pub const fn new(port: u16) -> Self {
-        Port { port }
-    }
-
     pub unsafe fn write(&self, data: u8) {
         unsafe {
             asm!("out dx, al", in("dx") self.port, in("al") data, options(nomem, nostack, preserves_flags));
