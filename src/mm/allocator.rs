@@ -1,26 +1,9 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::null_mut;
 use spin::Mutex;
-
-pub struct Node {
-    pub size: usize,
-    pub next: Option<&'static mut Node>,
-}
-
-pub struct DummyAllocator {
-    pub head: Node,
-}
+use crate::mm::types::{Node, DummyAllocator, KernelAllocator};
 
 impl DummyAllocator {
-    pub const fn new() -> Self {
-        Self {
-            head: Node {
-                size: 0,
-                next: None,
-            },
-        }
-    }
-
     pub fn alloc(&mut self, layout: Layout) -> *mut u8 {
         let mut size = layout.size().max(core::mem::size_of::<Node>());
         let node_align = core::mem::align_of::<Node>();
@@ -134,10 +117,6 @@ impl DummyAllocator {
             }
         }
     }
-}
-
-pub struct KernelAllocator {
-    inner: Mutex<DummyAllocator>,
 }
 
 unsafe impl GlobalAlloc for KernelAllocator {

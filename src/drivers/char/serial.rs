@@ -1,4 +1,5 @@
-use crate::arch::port::Port;
+use crate::arch::types::Port;
+use crate::drivers::traits::CharDevice;
 
 pub struct SerialPort {
     data_port: Port,
@@ -54,6 +55,28 @@ impl SerialPort {
         unsafe {
             self.data_port.write(byte);
         }
+    }
+
+    pub fn read_byte(&self) -> Option<u8> {
+        unsafe {
+            if (self.line_sts_port.read() & 1) != 0 {
+                let mut c = self.data_port.read();
+                if c == b'\r' { c = b'\n'; }
+                Some(c)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+impl CharDevice for SerialPort {
+    fn read(&self) -> Option<u8> {
+        self.read_byte()
+    }
+
+    fn write(&self, byte: u8) {
+        self.write_byte(byte);
     }
 }
 

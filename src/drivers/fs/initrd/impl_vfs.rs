@@ -24,6 +24,10 @@ impl FileOperations for InitrdOps {
         Ok(bytes_to_read)
     }
 
+    fn write(&self, _node: &VfsNode, _offset: usize, _buf: &[u8]) -> Result<usize, VfsError> {
+        Err(VfsError::PermissionDenied)
+    }
+
     fn readdir(&self, _node: &VfsNode, buffer: &mut [u8]) -> Result<usize, VfsError> {
         let mut bytes_written = 0;
         let root = crate::fs::vfs_core::VFS_ROOT.lock();

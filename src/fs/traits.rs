@@ -2,6 +2,7 @@ use super::types::{VfsNode, VfsError};
 
 pub trait FileOperations: Send + Sync {
     fn read(&self, node: &VfsNode, offset: usize, buf: &mut [u8]) -> Result<usize, VfsError>;
+    fn write(&self, node: &VfsNode, offset: usize, buf: &[u8]) -> Result<usize, VfsError>;
     fn readdir(&self, node: &VfsNode, buf: &mut [u8]) -> Result<usize, VfsError>;
 }
 

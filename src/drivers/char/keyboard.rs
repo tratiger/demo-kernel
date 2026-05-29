@@ -76,3 +76,14 @@ pub fn push_ascii(c: u8) {
 pub fn pop_char() -> Option<u8> {
     KEYBOARD_BUFFER.lock().pop_front()
 }
+
+pub struct Keyboard;
+
+impl crate::drivers::traits::CharDevice for Keyboard {
+    fn read(&self) -> Option<u8> {
+        pop_char()
+    }
+    fn write(&self, _byte: u8) {
+        // Keyboard cannot be written to
+    }
+}

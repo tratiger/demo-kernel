@@ -1,29 +1,9 @@
 use core::arch::asm;
 
+use crate::arch::types::{PageDirectory, PageTable};
+
 pub const PAGE_SIZE: u32 = 4096;
 pub const USER_ACCESSIBLE: u32 = 1 << 2;
-
-#[repr(C, align(4096))]
-pub struct PageDirectory {
-    pub entries: [u32; 1024],
-}
-
-#[repr(C, align(4096))]
-pub struct PageTable {
-    pub entries: [u32; 1024],
-}
-
-impl PageDirectory {
-    pub const fn new() -> Self {
-        PageDirectory { entries: [0; 1024] }
-    }
-}
-
-impl PageTable {
-    pub const fn new() -> Self {
-        PageTable { entries: [0; 1024] }
-    }
-}
 
 pub static mut KERNEL_PAGE_DIRECTORY: PageDirectory = PageDirectory::new();
 pub static mut PAGE_TABLE_0: PageTable = PageTable::new();
