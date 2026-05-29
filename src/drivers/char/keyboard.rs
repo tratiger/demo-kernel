@@ -1,7 +1,7 @@
 use alloc::collections::VecDeque;
-use spin::Mutex;
 
-pub static KEYBOARD_BUFFER: Mutex<VecDeque<u8>> = Mutex::new(VecDeque::new());
+
+pub static KEYBOARD_BUFFER: crate::kernel::sync::KernelMutex<VecDeque<u8>> = crate::kernel::sync::KernelMutex::new(VecDeque::new());
 
 pub fn push_scancode(scancode: u8) {
     // Only care about 'make' codes (MSB not set)
@@ -77,9 +77,9 @@ pub fn pop_char() -> Option<u8> {
     KEYBOARD_BUFFER.lock().pop_front()
 }
 
-pub struct Keyboard;
+pub(crate) struct Keyboard;
 
-impl crate::drivers::traits::CharDevice for Keyboard {
+impl crate::drivers::char::traits::CharDevice for Keyboard {
     fn read(&self) -> Option<u8> {
         pop_char()
     }

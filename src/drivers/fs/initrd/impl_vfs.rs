@@ -3,7 +3,7 @@ use alloc::sync::Arc;
 use crate::fs::traits::FileOperations;
 use crate::fs::types::{VfsError, VfsNode, FileType};
 
-pub struct InitrdOps;
+pub(crate) struct InitrdOps;
 
 impl FileOperations for InitrdOps {
     fn read(&self, node: &VfsNode, offset: usize, buf: &mut [u8]) -> Result<usize, VfsError> {
@@ -33,7 +33,8 @@ impl FileOperations for InitrdOps {
         let root = crate::fs::vfs_core::VFS_ROOT.lock();
 
         for file_node in root.iter() {
-            let name_bytes = file_node.name.as_bytes();
+            let locked_node = file_node.lock();
+            let name_bytes = locked_node.name.as_bytes();
             let len = name_bytes.len();
 
             if bytes_written + len + 1 > buffer.len() {

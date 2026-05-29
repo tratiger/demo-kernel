@@ -34,8 +34,11 @@ pub unsafe fn init() {
         (*pd_ptr).entries[0] = pt0_phys | 3; // Present, R/W
         (*pd_ptr).entries[1] = pt1_phys | 3; // Present, R/W
 
-        // Enable paging
+        // Recursive paging
         let pd_phys = pd_ptr as u32;
+        (*pd_ptr).entries[1023] = pd_phys | 3;
+
+        // Enable paging
 
         asm!("mov cr3, {}", in(reg) pd_phys, options(nostack, preserves_flags));
 
@@ -52,55 +55,31 @@ pub unsafe fn map_page(virt_addr: u32, phys_addr: u32, flags: u32) {
     let pd_index = (virt_addr >> 22) as usize;
     let pt_index = ((virt_addr >> 12) & 0x3FF) as usize;
 
-    let pd_ptr = core::ptr::addr_of_mut!(KERNEL_PAGE_DIRECTORY);
-    let pde = unsafe { (*pd_ptr).entries[pd_index] };
+    let pd_virt = 0xFFFFF000 as *mut u32;
+    let pde = unsafe { core::ptr::read_volatile(pd_virt.add(pd_index)) };
 
-    let mut cr0: u32;
-    unsafe {
-        asm!("mov {}, cr0", out(reg) cr0, options(nomem, nostack, preserves_flags));
-    }
-    let paging_enabled = (cr0 & 0x80000000) != 0;
-
-    if paging_enabled {
-        // Temporarily disable paging to write to physical memory > 8MB
-        let cr0_disabled = cr0 & !0x80000000;
-        unsafe {
-            asm!("mov cr0, {}", in(reg) cr0_disabled, options(nostack, preserves_flags));
-        }
-    }
-
-    let pt_phys = if (pde & 1) == 0 {
+    if (pde & 1) == 0 {
         // Page table not present, allocate a new frame
         let new_frame = unsafe {
             crate::mm::memory::allocate_frame().expect("Out of memory when allocating page table!")
         };
 
-        // Clear the new page table
-        let pt_ptr = new_frame as *mut PageTable;
-        unsafe {
-            core::ptr::write_bytes(pt_ptr, 0, 1);
-        }
-
         // Add the new page table to the page directory (Present, R/W)
         unsafe {
-            (*pd_ptr).entries[pd_index] = new_frame | 3 | (flags & USER_ACCESSIBLE);
+            core::ptr::write_volatile(pd_virt.add(pd_index), new_frame | 3 | (flags & USER_ACCESSIBLE));
         }
-        new_frame
-    } else {
-        pde & 0xFFFFF000
-    };
 
-    let pt_ptr = pt_phys as *mut PageTable;
-    // Set the page table entry
-    unsafe {
-        (*pt_ptr).entries[pt_index] = (phys_addr & 0xFFFFF000) | (flags & 0xFFF);
+        // Clear the new page table
+        let pt_virt = (0xFFC00000 + (pd_index as u32 * 4096)) as *mut u32;
+        unsafe {
+            core::ptr::write_bytes(pt_virt, 0, 1024);
+        }
     }
 
-    if paging_enabled {
-        // Re-enable paging
-        unsafe {
-            asm!("mov cr0, {}", in(reg) cr0, options(nostack, preserves_flags));
-        }
+    let pt_virt = (0xFFC00000 + (pd_index as u32 * 4096)) as *mut u32;
+    // Set the page table entry
+    unsafe {
+        core::ptr::write_volatile(pt_virt.add(pt_index), (phys_addr & 0xFFFFF000) | (flags & 0xFFF));
     }
 
     // Flush TLB
