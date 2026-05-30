@@ -1,4 +1,4 @@
-use spin::Mutex;
+
 
 pub struct Node {
     pub size: usize,
@@ -21,7 +21,7 @@ impl DummyAllocator {
 }
 
 pub struct KernelAllocator {
-    pub inner: Mutex<DummyAllocator>,
+    pub inner: crate::kernel::sync::KernelMutex<DummyAllocator>,
 }
 
 pub struct MemoryFrameAllocator {

@@ -1,14 +1,38 @@
 use crate::println;
-use crate::drivers::char::serial::SERIAL1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum Syscall {
+    Exit = 1,
+    Read = 3,
+    Write = 4,
+    Open = 5,
+    Readdir = 6,
+    Close = 7,
+}
+
+impl Syscall {
+    pub fn from_u32(num: u32) -> Option<Self> {
+        match num {
+            1 => Some(Self::Exit),
+            3 => Some(Self::Read),
+            4 => Some(Self::Write),
+            5 => Some(Self::Open),
+            6 => Some(Self::Readdir),
+            7 => Some(Self::Close),
+            _ => None,
+        }
+    }
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn syscall_dispatch(num: u32, arg1: u32, arg2: u32, arg3: u32) -> u32 {
-    match num {
-        3 => {
+    match Syscall::from_u32(num) {
+        Some(Syscall::Read) => {
             let fd = arg1 as usize;
             let start = arg2;
             let len = arg3;
-            if start < 0x40000000 {
+            if !crate::mm::is_user_memory(start, len) {
                 return u32::MAX;
             }
             let mut thread_opt = crate::kernel::task::SCHEDULER.lock().current_thread.take();
@@ -16,7 +40,7 @@ pub extern "C" fn syscall_dispatch(num: u32, arg1: u32, arg2: u32, arg3: u32) ->
             if let Some(mut thread) = thread_opt {
                 if fd < thread.file_descriptors.len() {
                     if let Some((ref node, ref mut offset)) = thread.file_descriptors[fd] {
-                        if let Some(ref ops) = node.ops {
+                        if let Some(ops) = crate::fs::vfs_core::get_ops(node.ops_index) {
                             let slice = unsafe {
                                 core::slice::from_raw_parts_mut(start as *mut u8, len as usize)
                             };
@@ -31,23 +55,19 @@ pub extern "C" fn syscall_dispatch(num: u32, arg1: u32, arg2: u32, arg3: u32) ->
             }
             read_bytes
         }
-4 => {
+        Some(Syscall::Write) => {
             let fd = arg1 as usize;
             let start = arg2;
             let len = arg3;
-            if start < 0x40000000 { return u32::MAX; }
-            let end = start.checked_add(len);
-            if end.is_none() { return u32::MAX; }
-            let end = end.unwrap();
-            let valid_data = end <= 0x40000000 + 40 * 4096;
-            let valid_stack = start >= 0xA0000000 - 40 * 4096 && end <= 0xA0000000;
-            if !valid_data && !valid_stack { return u32::MAX; }
+            if !crate::mm::is_user_memory(start, len) {
+                return u32::MAX;
+            }
             let mut thread_opt = crate::kernel::task::SCHEDULER.lock().current_thread.take();
             let mut write_bytes = u32::MAX;
             if let Some(mut thread) = thread_opt {
                 if fd < thread.file_descriptors.len() {
                     if let Some((ref node, ref mut offset)) = thread.file_descriptors[fd] {
-                        if let Some(ref ops) = node.ops {
+                        if let Some(ops) = crate::fs::vfs_core::get_ops(node.ops_index) {
                             let slice = unsafe { core::slice::from_raw_parts(start as *const u8, len as usize) };
                             if let Ok(bytes) = ops.write(node, *offset, slice) {
                                 *offset += bytes;
@@ -60,16 +80,12 @@ pub extern "C" fn syscall_dispatch(num: u32, arg1: u32, arg2: u32, arg3: u32) ->
             }
             write_bytes
         }
-5 => {
+        Some(Syscall::Open) => {
             let start = arg1;
             let len = arg2;
-            if start < 0x40000000 { return u32::MAX; }
-            let end = start.checked_add(len);
-            if end.is_none() { return u32::MAX; }
-            let end = end.unwrap();
-            let valid_data = end <= 0x40000000 + 40 * 4096;
-            let valid_stack = start >= 0xA0000000 - 40 * 4096 && end <= 0xA0000000;
-            if !valid_data && !valid_stack { return u32::MAX; }
+            if !crate::mm::is_user_memory(start, len) {
+                return u32::MAX;
+            }
             let slice = unsafe { core::slice::from_raw_parts(start as *const u8, len as usize) };
             if let Ok(path) = core::str::from_utf8(slice) {
                 let trimmed_path = path.trim_matches(char::from(0));
@@ -103,24 +119,20 @@ pub extern "C" fn syscall_dispatch(num: u32, arg1: u32, arg2: u32, arg3: u32) ->
             }
             u32::MAX
         }
-6 => {
+        Some(Syscall::Readdir) => {
             let fd = arg1 as usize;
             let start = arg2;
             let len = arg3;
-            if start < 0x40000000 { return u32::MAX; }
-            let end = start.checked_add(len);
-            if end.is_none() { return u32::MAX; }
-            let end = end.unwrap();
-            let valid_data = end <= 0x40000000 + 40 * 4096;
-            let valid_stack = start >= 0xA0000000 - 40 * 4096 && end <= 0xA0000000;
-            if !valid_data && !valid_stack { return u32::MAX; }
+            if !crate::mm::is_user_memory(start, len) {
+                return u32::MAX;
+            }
             let mut thread_opt = crate::kernel::task::SCHEDULER.lock().current_thread.take();
             let mut read_bytes = u32::MAX;
             if let Some(mut thread) = thread_opt {
                 if fd < thread.file_descriptors.len() {
                     if let Some(thread_fd) = thread.file_descriptors.get(fd) {
                         if let Some((node, _)) = thread_fd {
-                            if let Some(ref ops) = node.ops {
+                            if let Some(ops) = crate::fs::vfs_core::get_ops(node.ops_index) {
                                 let slice = unsafe {
                                     core::slice::from_raw_parts_mut(start as *mut u8, len as usize)
                                 };
@@ -135,14 +147,27 @@ pub extern "C" fn syscall_dispatch(num: u32, arg1: u32, arg2: u32, arg3: u32) ->
             }
             read_bytes
         }
-        1 => {
-            // sys_exit
+        Some(Syscall::Close) => {
+            let fd = arg1 as usize;
+            let mut thread_opt = crate::kernel::task::SCHEDULER.lock().current_thread.take();
+            let mut result = u32::MAX;
+            if let Some(mut thread) = thread_opt {
+                if fd < thread.file_descriptors.len() {
+                    if thread.file_descriptors[fd].is_some() {
+                        thread.file_descriptors[fd] = None;
+                        result = 0;
+                    }
+                }
+                crate::kernel::task::SCHEDULER.lock().current_thread = Some(thread);
+            }
+            result
+        }
+        Some(Syscall::Exit) => {
             println!("User process exited with status: {}", arg1);
             loop {
                 core::hint::spin_loop();
             }
         }
-
         _ => {
             println!("Unknown syscall: {}", num);
             u32::MAX

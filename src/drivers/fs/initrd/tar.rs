@@ -1,5 +1,5 @@
 use crate::fs::types::{FileType, VfsError, VfsNode};
-use crate::fs::vfs_core::mount;
+
 use alloc::string::String;
 use alloc::sync::Arc;
 use crate::drivers::fs::initrd::impl_vfs::InitrdOps;
@@ -67,9 +67,10 @@ pub fn init(start_addr: u32, end_addr: u32) {
             size,
             file_type,
             data_ptr,
-            ops: Some(Arc::new(InitrdOps)),
+            ops_index: 1,
+            children: alloc::vec::Vec::new(),
         };
-        mount(node);
+        crate::fs::vfs_core::mount(node);
 
         // Next file: 512 bytes for header + data, padded to 512-byte boundary
         let data_blocks = (size + 511) / 512;

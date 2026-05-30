@@ -29,7 +29,6 @@ const MAGIC: u32 = 0x1BADB002;
 const FLAGS: u32 = ALIGN | MEMINFO;
 const CHECKSUM: u32 = -(MAGIC as i32 + FLAGS as i32) as u32;
 
-// The boot assembly
 core::arch::global_asm!(
     ".section .multiboot_header",
     ".align 4",
@@ -133,6 +132,12 @@ pub extern "C" fn kernel_main(magic: u32, mbi_ptr: u32) -> ! {
 
     println!("Initializing Scheduler...");
     crate::kernel::task::init();
+
+        // Dependency Injection
+        let stdio = alloc::sync::Arc::new(crate::drivers::char::stdio::Stdio);
+        let stdio_ops = alloc::sync::Arc::new(crate::drivers::fs::char_adapter::CharDeviceAdapter { device: stdio });
+        crate::kernel::task::init_stdio(stdio_ops);
+
 
     println!("Testing dynamic memory mapping with user privilege...");
     unsafe {

@@ -1,4 +1,4 @@
-use crate::drivers::traits::CharDevice;
+use crate::drivers::char::traits::CharDevice;
 use crate::drivers::char::serial::SERIAL1;
 use crate::drivers::char::keyboard::Keyboard;
 

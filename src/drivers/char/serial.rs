@@ -1,5 +1,5 @@
 use crate::arch::types::Port;
-use crate::drivers::traits::CharDevice;
+use crate::drivers::char::traits::CharDevice;
 
 pub struct SerialPort {
     data_port: Port,
@@ -95,7 +95,7 @@ impl core::fmt::Write for SerialPort {
     }
 }
 
-pub static SERIAL1: spin::Mutex<SerialPort> = spin::Mutex::new(SerialPort::new(0x3F8));
+pub(crate) static SERIAL1: crate::kernel::sync::KernelMutex<SerialPort> = crate::kernel::sync::KernelMutex::new(SerialPort::new(0x3F8));
 
 #[macro_export]
 macro_rules! print {

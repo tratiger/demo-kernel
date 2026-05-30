@@ -1,6 +1,6 @@
 use crate::fs::traits::FileOperations;
 use crate::fs::types::{VfsError, VfsNode};
-use crate::drivers::traits::CharDevice;
+use crate::drivers::char::traits::CharDevice;
 use alloc::sync::Arc;
 
 pub struct CharDeviceAdapter {

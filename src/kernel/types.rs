@@ -13,7 +13,8 @@ pub enum ThreadState {
 pub struct Thread {
     pub id: usize,
     pub stack_ptr: u32,
-    pub stack_allocated: Vec<u8>,
+    pub stack_end: u32,
+    pub stack_bottom: u32,
     pub state: ThreadState,
     pub file_descriptors: Vec<Option<(VfsNode, usize)>>,
 }
@@ -34,7 +35,8 @@ impl Thread {
         Self {
             id,
             stack_ptr: 0,
-            stack_allocated: Vec::new(),
+            stack_end: 0,
+            stack_bottom: 0,
             state: ThreadState::Ready,
             file_descriptors: fds,
         }
@@ -47,6 +49,17 @@ impl Scheduler {
             ready_queue: VecDeque::new(),
             current_thread: None,
             next_id: 1, // 0 is reserved for the main thread
+        }
+    }
+}
+
+impl Drop for Thread {
+    fn drop(&mut self) {
+        // Free stack frames
+        if self.stack_bottom != 0 {
+            unsafe { crate::mm::memory::deallocate_frame(self.stack_bottom); }
+            // Guard frame is immediately before the stack frame
+            unsafe { crate::mm::memory::deallocate_frame(self.stack_bottom - 4096); }
         }
     }
 }

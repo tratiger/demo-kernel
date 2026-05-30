@@ -3,3 +3,4 @@ pub mod interrupts;
 pub mod paging;
 pub mod port;
 pub mod types;
+pub mod x86;

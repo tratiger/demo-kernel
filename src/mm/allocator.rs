@@ -1,6 +1,6 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::null_mut;
-use spin::Mutex;
+
 use crate::mm::types::{Node, DummyAllocator, KernelAllocator};
 
 impl DummyAllocator {
@@ -131,7 +131,7 @@ unsafe impl GlobalAlloc for KernelAllocator {
 
 #[global_allocator]
 static ALLOCATOR: KernelAllocator = KernelAllocator {
-    inner: Mutex::new(DummyAllocator::new()),
+    inner: crate::kernel::sync::KernelMutex::new(DummyAllocator::new()),
 };
 
 pub const HEAP_START: usize = 0x10000000;

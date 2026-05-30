@@ -1,12 +1,13 @@
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
-use spin::Mutex;
+
 use crate::arch::types::TaskContext;
 use crate::kernel::types::{Thread, ThreadState, Scheduler};
 use crate::fs::types::VfsNode;
 
-pub static SCHEDULER: Mutex<Scheduler> = Mutex::new(Scheduler::new());
+
+pub static SCHEDULER: crate::kernel::sync::KernelMutex<Scheduler> = crate::kernel::sync::KernelMutex::new(Scheduler::new());
 
 #[unsafe(naked)]
 pub unsafe extern "C" fn switch_to(old_esp: *mut u32, new_esp: u32) {
@@ -34,39 +35,36 @@ pub unsafe extern "C" fn switch_to(old_esp: *mut u32, new_esp: u32) {
 pub fn init() {
     let mut sched = SCHEDULER.lock();
     let mut main_thread = Box::new(Thread::new(0));
-
-    // Inject STDIN and STDOUT using CharDeviceAdapter
-    use crate::drivers::fs::char_adapter::CharDeviceAdapter;
-    use alloc::sync::Arc;
-    use crate::drivers::char::stdio::Stdio;
-    use crate::fs::types::FileType;
-    use alloc::string::String;
-
-    let stdio_ops = Arc::new(CharDeviceAdapter {
-        device: Arc::new(Stdio),
-    });
-
-    let stdin_node = VfsNode {
-        name: String::from("stdin"),
-        size: 0,
-        file_type: FileType::File,
-        data_ptr: 0,
-        ops: Some(stdio_ops.clone()),
-    };
-
-    let stdout_node = VfsNode {
-        name: String::from("stdout"),
-        size: 0,
-        file_type: FileType::File,
-        data_ptr: 0,
-        ops: Some(stdio_ops.clone()),
-    };
-
-    main_thread.file_descriptors[0] = Some((stdin_node, 0));
-    main_thread.file_descriptors[1] = Some((stdout_node, 0));
-
     main_thread.state = ThreadState::Running;
     sched.current_thread = Some(main_thread);
+}
+
+pub fn init_stdio(ops: alloc::sync::Arc<dyn crate::fs::traits::FileOperations>) {
+    let mut sched = SCHEDULER.lock();
+    if let Some(ref mut main_thread) = sched.current_thread {
+        let ops_index = crate::fs::vfs_core::register_ops(ops);
+
+        let stdin_node = crate::fs::types::VfsNode {
+            name: alloc::string::String::from("stdin"),
+            size: 0,
+            file_type: crate::fs::types::FileType::File,
+            data_ptr: 0,
+            ops_index,
+            children: alloc::vec::Vec::new(),
+        };
+
+        let stdout_node = crate::fs::types::VfsNode {
+            name: alloc::string::String::from("stdout"),
+            size: 0,
+            file_type: crate::fs::types::FileType::File,
+            data_ptr: 0,
+            ops_index,
+            children: alloc::vec::Vec::new(),
+        };
+
+        main_thread.file_descriptors[0] = Some((stdin_node, 0));
+        main_thread.file_descriptors[1] = Some((stdout_node, 0));
+    }
 }
 
 pub fn spawn(entry_point: fn()) {
@@ -76,12 +74,12 @@ pub fn spawn(entry_point: fn()) {
 
     let mut thread = Box::new(Thread::new(id));
 
-    // Allocate 4KB stack
-    let mut stack = Vec::<u8>::new();
-    stack.resize(4096, 0);
+    // Allocate 8KB stack (2 pages). Bottom page is guard page (unmapped), top page is the actual stack.
+    let _guard_frame = unsafe { crate::mm::memory::allocate_frame().expect("OOM") };
+    let stack_frame = unsafe { crate::mm::memory::allocate_frame().expect("OOM") };
 
-    let stack_end = stack.as_ptr() as u32 + 4096;
-    let aligned_stack_end = stack_end & !3; // Align to 4 bytes
+    let stack_end = stack_frame + 4096;
+    let aligned_stack_end = stack_end & !3;
 
     let context_ptr =
         (aligned_stack_end - core::mem::size_of::<TaskContext>() as u32) as *mut TaskContext;
@@ -97,7 +95,8 @@ pub fn spawn(entry_point: fn()) {
     }
 
     thread.stack_ptr = context_ptr as u32;
-    thread.stack_allocated = stack;
+    thread.stack_end = stack_end;
+    thread.stack_bottom = stack_frame;
 
     sched.ready_queue.push_back(thread);
 }
@@ -122,6 +121,7 @@ pub fn yield_task() {
 
     let old_esp_ptr = &mut current.stack_ptr as *mut u32;
     let new_esp = next.stack_ptr;
+    let new_esp0 = next.stack_end;
 
     sched.ready_queue.push_back(current);
     sched.current_thread = Some(next);
@@ -130,6 +130,7 @@ pub fn yield_task() {
     drop(sched);
 
     unsafe {
+        crate::arch::gdt::TSS.esp0 = new_esp0;
         switch_to(old_esp_ptr, new_esp);
     }
 }

@@ -1,6 +1,5 @@
 use alloc::string::String;
 use alloc::sync::Arc;
-use crate::fs::traits::FileOperations;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {
@@ -24,7 +23,8 @@ pub struct VfsNode {
     pub size: usize,
     pub file_type: FileType,
     pub data_ptr: u32,
-    pub ops: Option<Arc<dyn FileOperations>>,
+    pub ops_index: usize,
+    pub children: alloc::vec::Vec<alloc::sync::Arc<crate::kernel::sync::KernelMutex<VfsNode>>>,
 }
 
 impl core::fmt::Debug for VfsNode {
